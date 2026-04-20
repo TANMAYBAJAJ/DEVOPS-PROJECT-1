@@ -1,0 +1,214 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DevOps Task Manager — Docker Compose (Full Stack)
+#
+# Services running in Docker:
+#   postgres           → PostgreSQL database        (port 5432)
+#   notification-svc   → Notification logger        (port 3003)
+#   user-svc           → User auth service          (port 3001)
+#   task-svc           → Task CRUD service          (port 3002)
+#   api-gateway        → API Gateway / router       (port 3000)
+#   frontend           → React SPA via Nginx        (port 80)   ← NEW
+#
+# Networks:
+#   backend  — internal service-to-service communication
+#   frontend — frontend ↔ api-gateway communication
+#
+# Frontend Nginx proxies /api/* → http://api-gateway:3000 (Docker DNS).
+#
+# Usage:
+#   docker compose up --build -d       # Build & start all services
+#   docker compose down                # Stop containers
+#   docker compose down -v             # Stop + delete volumes (wipes DB)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: dtm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: devops_tasks
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d devops_tasks"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend
+
+  # ── Notification Service ──────────────────────────────────────────────────────
+  notification-svc:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: dtm-notification
+    restart: unless-stopped
+    environment:
+      PORT: 3003
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: devops_tasks
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3003/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - backend
+
+  # ── User Service ──────────────────────────────────────────────────────────────
+  user-svc:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: dtm-user
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: devops_tasks
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      JWT_SECRET: supersecretjwtkey123   # change in production
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - backend
+
+  # ── Task Service ──────────────────────────────────────────────────────────────
+  task-svc:
+    build:
+      context: ./task-service
+      dockerfile: Dockerfile
+    container_name: dtm-task
+    restart: unless-stopped
+    environment:
+      PORT: 3002
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: devops_tasks
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      JWT_SECRET: supersecretjwtkey123   # must match user-svc and api-gateway
+      NOTIFICATION_SERVICE_URL: http://notification-svc:3003
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      notification-svc:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3002/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - backend
+
+  # ── API Gateway ───────────────────────────────────────────────────────────────
+  # Port 3000 is exposed to the host for debugging; frontend container reaches
+  # it via Docker DNS (api-gateway:3000) on the shared 'frontend' network.
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: dtm-gateway
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      JWT_SECRET: supersecretjwtkey123   # must match user-svc and task-svc
+      USER_SERVICE_URL: http://user-svc:3001
+      TASK_SERVICE_URL: http://task-svc:3002
+      NOTIFICATION_SERVICE_URL: http://notification-svc:3003
+    ports:
+      - "3000:3000"                      # exposed for debugging; frontend uses internal DNS
+    depends_on:
+      user-svc:
+        condition: service_healthy
+      task-svc:
+        condition: service_healthy
+      notification-svc:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - backend
+      - frontend           # shared with the frontend container
+
+  # ── Frontend (React + Nginx) ──────────────────────────────────────────────────
+  # Multi-stage build: Node 18 compiles the Vite/React app, then the compiled
+  # dist/ is served by Nginx on port 80.  Nginx proxies /api/* to api-gateway.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: dtm-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"                          # React app accessible at http://localhost
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - frontend           # can reach api-gateway via Docker DNS
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Networks
+# backend:  all internal service-to-service communication
+# frontend: frontend ↔ api-gateway only (least-privilege exposure)
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Volumes
+# postgres_data: persists DB data across container restarts
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
