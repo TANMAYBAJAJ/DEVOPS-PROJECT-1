@@ -2,7 +2,7 @@
 FROM node:20-alpine3.21 AS deps
 
 WORKDIR /app
-
+RUN apk update && apk upgrade --no-cache
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
 
@@ -10,7 +10,7 @@ RUN npm install --omit=dev
 FROM node:20-alpine3.21 AS runtime
 
 WORKDIR /app
-
+RUN apk update && apk upgrade --no-cache
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 

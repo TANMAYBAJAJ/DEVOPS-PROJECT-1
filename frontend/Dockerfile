@@ -5,7 +5,7 @@
 FROM node:20-alpine3.21 AS builder
 
 WORKDIR /app
-
+RUN apk update && apk upgrade --no-cache
 # Install dependencies first (layer-cache friendly)
 COPY package.json package-lock.json* ./
 RUN npm install --silent
@@ -20,7 +20,7 @@ RUN npm run build
 # Only the compiled assets are copied — no Node, no source code in the final image.
 # ──────────────────────────────────────────────────────────────────────────────
 FROM nginx:1.27-alpine3.21 AS runtime
-
+RUN apk update && apk upgrade --no-cache
 # Remove the default Nginx welcome page
 RUN rm -rf /usr/share/nginx/html/*
 
