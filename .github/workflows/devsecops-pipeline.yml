@@ -4,9 +4,6 @@ on:
   push:
     branches: [main]
 
-env:
-  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-
 jobs:
   build-scan-push:
     name: Build, Scan & Push — ${{ matrix.service.name }}
@@ -49,14 +46,14 @@ jobs:
       - name: Build Docker Image
         run: |
           docker build \
-            -t ${{ env.DOCKER_USERNAME }}/${{ matrix.service.image }}:${{ github.sha }} \
-            -t ${{ env.DOCKER_USERNAME }}/${{ matrix.service.image }}:latest \
+            -t ${{ secrets.DOCKER_USERNAME }}/${{ matrix.service.image }}:${{ github.sha }} \
+            -t ${{ secrets.DOCKER_USERNAME }}/${{ matrix.service.image }}:latest \
             ${{ matrix.service.context }}
 
       - name: Trivy Security Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.DOCKER_USERNAME }}/${{ matrix.service.image }}:${{ github.sha }}
+          image-ref: ${{ secrets.DOCKER_USERNAME }}/${{ matrix.service.image }}:${{ github.sha }}
           format: table
           exit-code: '1'
           severity: CRITICAL
@@ -66,7 +63,7 @@ jobs:
         uses: aquasecurity/trivy-action@master
         if: always()
         with:
-          image-ref: ${{ env.DOCKER_USERNAME }}/${{ matrix.service.image }}:${{ github.sha }}
+          image-ref: ${{ secrets.DOCKER_USERNAME }}/${{ matrix.service.image }}:${{ github.sha }}
           format: sarif
           output: trivy-${{ matrix.service.name }}.sarif
 
@@ -79,8 +76,8 @@ jobs:
 
       - name: Push to Docker Hub
         run: |
-          docker push ${{ env.DOCKER_USERNAME }}/${{ matrix.service.image }}:${{ github.sha }}
-          docker push ${{ env.DOCKER_USERNAME }}/${{ matrix.service.image }}:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/${{ matrix.service.image }}:${{ github.sha }}
+          docker push ${{ secrets.DOCKER_USERNAME }}/${{ matrix.service.image }}:latest
 
   pipeline-summary:
     name: Pipeline Complete ✅
