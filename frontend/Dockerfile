@@ -2,7 +2,7 @@
 # Use Node 18 Alpine to install deps and build the React/Vite app.
 # The output lands in /app/dist and is passed to the next stage.
 # ──────────────────────────────────────────────────────────────────────────────
-FROM node:18-alpine AS builder
+FROM node:20-alpine3.21 AS builder
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ RUN npm run build
 # Lightweight Nginx image to serve the static dist and proxy /api → api-gateway.
 # Only the compiled assets are copied — no Node, no source code in the final image.
 # ──────────────────────────────────────────────────────────────────────────────
-FROM nginx:1.25-alpine AS runtime
+FROM nginx:1.27-alpine3.21 AS runtime
 
 # Remove the default Nginx welcome page
 RUN rm -rf /usr/share/nginx/html/*
